@@ -1,5 +1,4 @@
-import ctypes
-import struct
+import re
 
 from keystone import *
 
@@ -57,7 +56,7 @@ def loadLibrary(library, function, ebp):
         "find_user32_funcs: 		"
         "mov ebx, eax				;"
         f"push {getHash(function)}	;"  # address for MessageBoxA
-        "call dword ptr [ebp+0x04]  ;"  # Call find_function. Looks like find_function(MessageBoxA)
+        "call dword ptr [ebp+0x04]  ;"  # Call find_function. Loo/ks like find_function(MessageBoxA)
         f"mov [ebp+0x{ebp}], eax        ;"  # store address for function into ebp+offset
     )
     return block
@@ -207,21 +206,21 @@ def generate(mode, args):
     elif mode == "cmd":
         assembly += winExec(args)
     assembly += TERMINATE
-    newline = ';"\n"'
-    #    print(f"Assembly\n{assembly.replace(';', newline).replace(':',newline)}\n\n")
 
     ks = Ks(KS_ARCH_X86, KS_MODE_32)
+
     encoding, count = ks.asm(assembly)
     print(f"Encoded {count} instructions")
-    return assembly, encoding
 
-    shellcode_printable = ""
-    sh = b""
-    for e in encoding:
-        sh += struct.pack("B", e)
-        shellcode_printable += "\\x{0:02x}".format(int(e)).rstrip("\n")
-    shellcode = bytearray(sh)
-    print(f'shellcode = b"{shellcode_printable}"')
+    # beautify assembly
+
+    pretty = "\n".join(
+        line.lstrip()
+        for line in assembly.replace(": ", ":\n").replace(";", ";\n").splitlines()
+    )
+    assembly = re.sub(r"(\w+): ", r"\n\1:", pretty)
+
+    return assembly, encoding
 
 
 TEMPLATE = (

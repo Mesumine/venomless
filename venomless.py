@@ -1,6 +1,8 @@
 import argparse
 import re
 
+from keystone import *
+
 from generate import generate
 
 
@@ -67,7 +69,7 @@ def main(args):
             filename = "shellcode.txt"
         if args.format == 0:
             format = "keystone"
-        elif args.format in ("python", "csharp", "c"):
+        elif args.format in ("keystone", "python", "csharp", "c"):
             format = args.format
         else:
             print(
@@ -78,11 +80,27 @@ def main(args):
             print(
                 f"You have chosen to create a test file called {filename} using format {format}"
             )
+    if args.bad:
+        if args.output:
+            filename = args.output
+        else:
+            filename = "badchars.py"
+        if args.format == 0:
+            format = "keystone"
+        elif args.format in ("keystone"):
+            format = args.format
+        else:
+            print("You have chosen an invalid format")
+        badchars = [int(val.strip(), 16) for val in args.bad.split(",")]
+        if args.verbose:
+            print(
+                f"You are creating a testing for the badchars {badchars}. The output will be stored as a keystone python script in {filename}."
+            )
 
     assembly, encoding = generate(mode, arguments)
 
     if filename != "":
-        writeOutput(filename, format, test, assembly, encoding)
+        writeOutput(filename, format, test, assembly, encoding, badchars)
 
 
 def pythonFormat(encoding):
@@ -124,20 +142,11 @@ def rawFormat(encoding):
     return shellcode
 
 
-def writeOutput(filename, format, test, assembly, encoding):
+def writeOutput(filename, format, test, assembly, encoding, badchars):
 
     match format:
         case "assembly":
-            pretty = "\n".join(
-                line.lstrip()
-                for line in assembly.replace(":", ":\n")
-                .replace(";", ";\n")
-                .splitlines()
-            )
-            output = re.sub(r"(\w+):", r"\n\1:", pretty)
-            #            output = "\n".join(
-            #    assembly.replace(":", ":\n").replace(";", ";\n").splitlines().lstrip()
-            # )
+            output = assembly
         case "python":
             if test == 0:
                 output = pythonFormat(encoding)
@@ -156,7 +165,44 @@ def writeOutput(filename, format, test, assembly, encoding):
             output = "import struct, ctypes\n"
             output += "from keystone import *\n"
             output += "ASSEMBLY = (\n"
-            output += f"\"{assembly.replace(';', newline).replace(': ', newline2)}"
+            if badchars:
+                print("Looking for bad characters in all shellcode (simple test)")
+                if any(val in encoding for val in badchars):
+                    print("there is a bad character")
+                    results = []
+                    for instruction in assembly.splitlines():
+                        try:
+                            ks = Ks(KS_ARCH_X86, KS_MODE_32)
+                            opcode, count = ks.asm(instruction)
+                            if any(val in opcode for val in badchars):
+                                opcodes = []
+                                for e in opcode:
+                                    opcodes += "{0:02x} ".format(int(e)).rstrip("\n")
+                                results.append(f"{''.join(opcodes)}: {instruction}")
+                                output += f"\";######## Bad Character located at instruction below ############\"\n\";{''.join(opcodes)}: {instruction}\"\n"
+                                output += f'"{instruction}"\n'
+                            else:
+                                output += f'"{instruction}"\n'
+                        except:
+                            # print(f"Something went wrong with instruction: {instruction}.\nIf this is a jump, then it is expected, you'll have to examine it manually.")
+                            output += f'"{instruction}"\n'
+                            continue
+                    if not results:
+                        print(
+                            "The bad character is most likely in a jump instruction, dissassemble with an online disassembler to find it"
+                        )
+                    else:
+                        print(
+                            "Bad characters were found in the following instructions:"
+                        )
+                        for result in results:
+                            print(result)
+
+                else:
+                    print("no bad characters found!")
+
+            else:
+                output += f"\"{assembly.replace(';', newline).replace(': ', newline2)}"
             output = output[:-1]
             output += "\n)\n"
             output += KSTEMPLATE
@@ -252,6 +298,12 @@ if __name__ == "__main__":
         "--test",
         help="Output a file that can be used to test the payload in the specified format. If not filename is given, the default is test.txt and the format is keystone.",
         action="store_true",
+    )
+    parser.add_argument(
+        "-b",
+        "--bad",
+        help="Test for the existence of badchars. Use the format 0x for testing. example: 0x00,0x0a,0x0d. If bad characters are created, will create a keystone format file with badcharacters highlighted.",
+        default=0,
     )
 
     args = parser.parse_args()
