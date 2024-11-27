@@ -117,6 +117,13 @@ def cFormat(encoding):
     return shellcode
 
 
+def rawFormat(encoding):
+    shellcode = ""
+    for e in encoding:
+        shellcode += "\\x{0:02x}".format(int(e)).rstrip("\n")
+    return shellcode
+
+
 def writeOutput(filename, format, test, assembly, encoding):
 
     match format:
@@ -157,6 +164,11 @@ def writeOutput(filename, format, test, assembly, encoding):
         case "c":
             if test == 0:
                 output = cFormat(encoding)
+            else:
+                print("This feature is not yet built")
+        case "raw":
+            if test == 0:
+                output = rawFormat(encoding)
             else:
                 print("This feature is not yet built")
 
