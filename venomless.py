@@ -1,4 +1,5 @@
 import argparse
+import re
 
 from generate import generate
 
@@ -29,7 +30,7 @@ def main(args):
         mode = "revshell"
         arguments = (lhost, lport)
 
-    if args.cmd:
+    elif args.cmd:
         if args.revshell:
             print(
                 "This tool cannot peform both revshell and cmd at same time. You must choose one."
@@ -41,14 +42,16 @@ def main(args):
             )
         mode = "cmd"
         arguments = args.cmd
+    else:
+        print("You must choose revshell of cmd in order to get output")
+        exit()
 
     if args.output:
-        if not mode:
-            print("You must choose revshell of cmd in order to get output")
-            exit()
         if args.format == 0:
             format = "python"
-        elif args.format in ("assembly", "keystone", "python", "csharp", "c"):
+            if args.verbose:
+                print("No output format specified, defaulting to python format")
+        elif args.format in ("assembly", "keystone", "python", "csharp", "c", "raw"):
             format = args.format
         else:
             print("You have chosen an invalid format")
@@ -118,7 +121,16 @@ def writeOutput(filename, format, test, assembly, encoding):
 
     match format:
         case "assembly":
-            output = assembly
+            pretty = "\n".join(
+                line.lstrip()
+                for line in assembly.replace(":", ":\n")
+                .replace(";", ";\n")
+                .splitlines()
+            )
+            output = re.sub(r"(\w+):", r"\n\1:", pretty)
+            #            output = "\n".join(
+            #    assembly.replace(":", ":\n").replace(";", ";\n").splitlines().lstrip()
+            # )
         case "python":
             if test == 0:
                 output = pythonFormat(encoding)

