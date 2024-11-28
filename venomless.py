@@ -8,6 +8,8 @@ from generate import generate
 
 def main(args):
     filename = ""
+    format = ""
+    badchars = 0
     test = args.test
     if args.revshell:
         if args.cmd:
@@ -48,59 +50,85 @@ def main(args):
         print("You must choose revshell of cmd in order to get output")
         exit()
 
+    # Handle specified output file 
     if args.output:
-        if args.format == 0:
-            format = "python"
-            if args.verbose:
-                print("No output format specified, defaulting to python format")
-        elif args.format in ("assembly", "keystone", "python", "csharp", "c", "raw"):
-            format = args.format
-        else:
-            print("You have chosen an invalid format")
-            exit()
         filename = args.output
-        if args.verbose:
-            print(f"You have chosen to output to {filename} in the format {format}")
-
-    if args.test:
-        if args.output:
-            filename = args.output
+        if format !=0:
+            if args.format in ("assembly","raw","keystone","python","csharp","c"):
+                format = args.format
+                if args.verbose:
+                    print(f"Creating shellcode in format: {format}\nSaving to file: {filename}")
+            else:
+                print(f"Improper format supplied. {filename} will not be created.")
+                exit()
         else:
-            filename = "shellcode.txt"
-        if args.format == 0:
             format = "keystone"
-        elif args.format in ("keystone", "python", "csharp", "c"):
-            format = args.format
-        else:
-            print(
-                "You have chosen an invalid format, test files can only be created for keystone, python, csharp and c"
-            )
-            exit()
+            if args.verbose:
+                print(f"No format specified for output file: {filename}. Defaulting to {format}.")
+
+    # Handle lack of specified output file by making default files when an output file is required.
+    elif args.test or (args.format == "keystone"):
+        match args.format:
+            case 0:
+                format = "keystone"
+                if args.bad:
+                    filename = "badchars.py"
+                else:
+                    filename = "kshellcode.py"
+            case "keystone":
+                format = args.format
+                filename = "kshellcode.py"
+            case "python":
+                filename = "shellcode.py"
+                format = args.format
+            case "csharp":
+                filename = "shellcode.cs"
+                format = args.format
+            case "c":
+                filename = "shellcode.c"
+                format = args.format
+            case "python":
+                filename = "shellcode.py"
+                format = args.format
+            case _:
+                print(
+                    "You have chosen an invalid format, test files can only be created for keystone, python, csharp and c"
+                )
+                exit()
         if args.verbose:
             print(
                 f"You have chosen to create a test file called {filename} using format {format}"
             )
-    if args.bad:
-        if args.output:
-            filename = args.output
-        else:
-            filename = "badchars.py"
-        if args.format == 0:
-            format = "keystone"
-        elif args.format in ("keystone"):
-            format = args.format
-        else:
-            print("You have chosen an invalid format")
-        badchars = [int(val.strip(), 16) for val in args.bad.split(",")]
+    # Handle lack of given output file when stdout is a viable option
+    else:
+        if args.format != 0:
+            if args.format in ("assembly", "raw", "python", "csharp", "c"):
+                format = args.format
+            elif args.format in ("keystone"):
+                print("keystone output requires an outfile.")
+                exit()
+            else:
+                print("Improper format given.")
+                exit()
         if args.verbose:
-            print(
-                f"You are creating a testing for the badchars {badchars}. The output will be stored as a keystone python script in {filename}."
-            )
+            print("You have not given an input file, will output to stdout.")
+
+    
+    # Handle bad character testing 
+    if args.bad:
+            badchars = [int(val.strip(), 16) for val in args.bad.split(",")]
+            hexchars = ", ".join(f"0x{val:02x}" for val in badchars)
+            if args.verbose:
+                print(
+                    f"You are creating shellcode and testing for the badchars {hexchars}. The output will be stored as a keystone python script in {filename}."
+                )
+
+
+
 
     assembly, encoding = generate(mode, arguments)
 
-    if filename != "":
-        writeOutput(filename, format, test, assembly, encoding, badchars)
+    writeOutput(filename, format, test, assembly, encoding, badchars)
 
 
 def pythonFormat(encoding):
@@ -141,12 +169,52 @@ def rawFormat(encoding):
         shellcode += "\\x{0:02x}".format(int(e)).rstrip("\n")
     return shellcode
 
+def testBad(assembly, encoding, badchars, format):
+    output = ""
+    print("Looking for bad characters in all shellcode (simple test)")
+    if any(val in encoding for val in badchars):
+        print("there is a bad character")
+        results = []
+        for instruction in assembly.splitlines():
+            try:
+                ks = Ks(KS_ARCH_X86, KS_MODE_32)
+                opcode, count = ks.asm(instruction)
+                if any(val in opcode for val in badchars):
+                    opcodes = []
+                    for e in opcode:
+                        opcodes += "{0:02x} ".format(int(e)).rstrip("\n")
+                    results.append(f"{''.join(opcodes)}: {instruction}")
+                    output += f"######## Bad Character located at instruction below ############\"\n### {''.join(opcodes)}: {instruction}\"\n"
+                    output += f'"{instruction}"\n'
+                else:
+                    output += f'"{instruction}"\n'
+            except:
+                output += f'"{instruction}"\n'
+                continue
+        if not results:
+            print(
+                "The bad character is most likely in a jump instruction, dissassemble with an online disassembler to find it"
+            )
+        else:
+            print(
+                "Bad characters were found in the following instructions:"
+            )
+            for result in results:
+                print(result)
+    else:
+        print("no bad characters found!")
+        output += f'"{re.sub("\n", "\"\n\"", assembly)}"'
+        output += "\""
+
+    if format == "keystone":
+        return output 
 
 def writeOutput(filename, format, test, assembly, encoding, badchars):
-
     match format:
         case "assembly":
             output = assembly
+            if badchars:
+                testBad(assembly, encoding, badchars, format)
         case "python":
             if test == 0:
                 output = pythonFormat(encoding)
@@ -154,76 +222,56 @@ def writeOutput(filename, format, test, assembly, encoding, badchars):
                 output = "import struct, ctypes\n\n"
                 output += pythonFormat(encoding)
                 output += PYSCRUNNER
+            if badchars:
+                testBad(assembly, encoding, badchars, format)
         case "csharp":
             if test == 0:
                 output = csharpFormat(encoding)
             else:
                 print("This feature is not yet built")
+            if badchars:
+                testBad(assembly, encoding, badchars, format)
         case "keystone":
-            newline = ';"\n"'
-            newline2 = ':"\n"'
             output = "import struct, ctypes\n"
             output += "from keystone import *\n"
             output += "ASSEMBLY = (\n"
             if badchars:
-                print("Looking for bad characters in all shellcode (simple test)")
-                if any(val in encoding for val in badchars):
-                    print("there is a bad character")
-                    results = []
-                    for instruction in assembly.splitlines():
-                        try:
-                            ks = Ks(KS_ARCH_X86, KS_MODE_32)
-                            opcode, count = ks.asm(instruction)
-                            if any(val in opcode for val in badchars):
-                                opcodes = []
-                                for e in opcode:
-                                    opcodes += "{0:02x} ".format(int(e)).rstrip("\n")
-                                results.append(f"{''.join(opcodes)}: {instruction}")
-                                output += f"\";######## Bad Character located at instruction below ############\"\n\";{''.join(opcodes)}: {instruction}\"\n"
-                                output += f'"{instruction}"\n'
-                            else:
-                                output += f'"{instruction}"\n'
-                        except:
-                            # print(f"Something went wrong with instruction: {instruction}.\nIf this is a jump, then it is expected, you'll have to examine it manually.")
-                            output += f'"{instruction}"\n'
-                            continue
-                    if not results:
-                        print(
-                            "The bad character is most likely in a jump instruction, dissassemble with an online disassembler to find it"
-                        )
-                    else:
-                        print(
-                            "Bad characters were found in the following instructions:"
-                        )
-                        for result in results:
-                            print(result)
-
-                else:
-                    print("no bad characters found!")
-
+                output += f"{testBad(assembly, encoding, badchars, format)}"
             else:
-                output += f"\"{assembly.replace(';', newline).replace(': ', newline2)}"
+                output += f'"{re.sub("\n", "\"\n\"", assembly)}"'
+                output += "\""
             output = output[:-1]
             output += "\n)\n"
             output += KSTEMPLATE
-            output += PYSCRUNNER
+            output += f"badchars = {badchars}\n"
+            output += BADTEST
+            output += PRINTSHELLCODE
+            if args.test:
+                output += PYSCRUNNER
         case "c":
             if test == 0:
                 output = cFormat(encoding)
             else:
                 print("This feature is not yet built")
+            if badchars:
+                testBad(assembly, encoding, badchars, format)
         case "raw":
             if test == 0:
                 output = rawFormat(encoding)
             else:
                 print("This feature is not yet built")
+            if badchars:
+                testBad(assembly, encoding, badchars, format)
 
         case _:
             print("You have chosen an invalid format")
             exit()
 
-    with open(filename, "w") as fhand:
-        fhand.write(output)
+    if filename != "":
+        with open(filename, "w") as fhand:
+            fhand.write(output)
+    else:
+        print(output)
 
 
 KSTEMPLATE = (
@@ -231,6 +279,8 @@ KSTEMPLATE = (
     "ks = Ks(KS_ARCH_X86, KS_MODE_32)\n"
     "encoding, count = ks.asm(ASSEMBLY)\n"
     'print(f"Encoded {count} instructions")\n'
+)
+PRINTSHELLCODE = (
     'sh = b""\n'
     'shellcode_printable = ""\n'
     "for e in encoding:\n"
@@ -262,10 +312,20 @@ PYSCRUNNER = (
     "\t\t\t\t\tctypes.c_int(-1))\n"
 )
 
+BADTEST = (
+    "print(\"Looking for bad characters in all shellcode (simple test)\")\n"
+    "if any(val in encoding for val in badchars):\n"
+    "\tprint(\"there is still a bad character\")\n"
+    "\texit()\n"
+    "else:\n"
+    "\tprint(\"No bad characters found\")\n" 
+)
+
 if __name__ == "__main__":
     formathelp = """
     assembly            Output the assembly
-    keystone            Output assemly-generator file that uses keystone engine to produce shellcode and run it
+    raw                 Output the raw shellcode in format 0xXX, 0xXX.
+    keystone            Output assemly-generator file that uses keystone engine to produce shellcode and run it. Has access to several custom formats to ease creation of custom payloads.
     python              Output as python-formatted shellcode. If -t is set, then will generate a .py file to test 
     csharp              Output as csharp-formatted shellcode. If -t is set, then will generate a .cs file to compile and test 
     c                   Output as c-formatted shellcode. If -t is set, then will generate a .c file to compile and test.
@@ -296,7 +356,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "-t",
         "--test",
-        help="Output a file that can be used to test the payload in the specified format. If not filename is given, the default is test.txt and the format is keystone.",
+        help="Output a file that can be used to test the payload in the specified format. If not filename is given, the default is shellcode.py and the format is keystone.",
         action="store_true",
     )
     parser.add_argument(
