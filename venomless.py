@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import argparse
 import re
 
@@ -71,10 +73,7 @@ def main(args):
         match args.format:
             case 0:
                 format = "keystone"
-                if args.bad:
-                    filename = "badchars.py"
-                else:
-                    filename = "kshellcode.py"
+                filename = "kshellcode.py"
             case "keystone":
                 format = args.format
                 filename = "kshellcode.py"
@@ -110,6 +109,10 @@ def main(args):
             else:
                 print("Improper format given.")
                 exit()
+        else:
+            format = "raw"
+            if args.verbose:
+                print("No format or output file given. Defaulting to raw and printing to stdout")
         if args.verbose:
             print("You have not given an input file, will output to stdout.")
 
@@ -232,8 +235,12 @@ def writeOutput(filename, format, test, assembly, encoding, badchars):
             if badchars:
                 testBad(assembly, encoding, badchars, format)
         case "keystone":
-            output = "import struct, ctypes\n"
-            output += "from keystone import *\n"
+            output = ""
+            if args.test:
+                output = "import ctypes\n"
+            output += "import struct\nimport re\nfrom keystone import *\n"
+            if badchars:
+                output += BADFUNC 
             output += "ASSEMBLY = (\n"
             if badchars:
                 output += f"{testBad(assembly, encoding, badchars, format)}"
@@ -274,12 +281,19 @@ def writeOutput(filename, format, test, assembly, encoding, badchars):
         print(output)
 
 
-KSTEMPLATE = (
-    "# Build the shell code\n"
-    "ks = Ks(KS_ARCH_X86, KS_MODE_32)\n"
-    "encoding, count = ks.asm(ASSEMBLY)\n"
-    'print(f"Encoded {count} instructions")\n'
+KSTEMPLATE = '''
+# Build the shell code
+ks = Ks(KS_ARCH_X86, KS_MODE_32)
+encoding, count = ks.asm(ASSEMBLY)
+print(f"Encoded {count} instructions")
+badchars = [0, 40, 160]
+pretty = "\\n".join(
+    line.lstrip()
+    for line in ASSEMBLY.replace(": ", ":\\n").replace(";", ";\\n").splitlines()
 )
+assembly = re.sub(r"(\\w+): ", r"\\n\1:", pretty)
+'''
+
 PRINTSHELLCODE = (
     'sh = b""\n'
     'shellcode_printable = ""\n'
@@ -313,13 +327,39 @@ PYSCRUNNER = (
 )
 
 BADTEST = (
-    "print(\"Looking for bad characters in all shellcode (simple test)\")\n"
-    "if any(val in encoding for val in badchars):\n"
-    "\tprint(\"there is still a bad character\")\n"
-    "\texit()\n"
-    "else:\n"
-    "\tprint(\"No bad characters found\")\n" 
+    "testBad(assembly, encoding, badchars)\n"
 )
+
+BADFUNC = '''
+def testBad(assembly, encoding, badchars):
+    print("Looking for bad characters in all shellcode (simple test)")
+    if any(val in encoding for val in badchars):
+        print("there is a bad character")
+        results = []
+        for instruction in assembly.splitlines():
+            try:
+                ks = Ks(KS_ARCH_X86, KS_MODE_32)
+                opcode, count = ks.asm(instruction)
+                if any(val in opcode for val in badchars):
+                    opcodes = []
+                    for e in opcode:
+                        opcodes += "{0:02x} ".format(int(e)).rstrip('\\n')
+                    results.append(f"{''.join(opcodes)}: {instruction}")
+            except:
+                continue
+        if not results:
+            print(
+                "The bad character is most likely in a jump instruction, dissassemble with an online disassembler to find it"
+            )
+        else:
+            print(
+                "Bad characters were found in the following instructions:"
+            )
+            for result in results:
+                print(result)
+    else:
+        print("no bad characters found!")
+'''
 
 if __name__ == "__main__":
     formathelp = """
